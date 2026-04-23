@@ -91,12 +91,15 @@ export default function MarketSignalPage() {
     const load = async () => {
       try {
         const res = await fetch("/api/market/snapshot", { cache: "no-store" });
+        const json = await res.json();
         if (!res.ok) {
-          throw new Error(`request failed: ${res.status}`);
+          const message =
+            typeof json?.message === "string" ? json.message : typeof json?.error === "string" ? json.error : `request failed: ${res.status}`;
+          throw new Error(message);
         }
-        const json = (await res.json()) as SnapshotPayload;
+        const payload = json as SnapshotPayload;
         if (!cancelled) {
-          setData(json);
+          setData(payload);
           setError("");
           setLastSuccessAt(new Date().toISOString());
         }
