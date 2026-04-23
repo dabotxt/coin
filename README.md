@@ -1,36 +1,48 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Crypto Market Signal Dashboard
 
-## Getting Started
+BTC / ETH 实时市场信号看板，基于 Binance 公开 Spot/Futures API 计算盘口压力、支撑阻力、多周期趋势、OI/Funding 和真假突破状态。
 
-First, run the development server:
+## 功能
+
+- BTCUSDT / ETHUSDT 实时价格与 24h 涨跌。
+- Top 20 买卖盘深度、买盘强度和即时盘口墙位。
+- 5m / 15m / 1h EMA 与 RSI 趋势共振。
+- VWAP、ATR、结构支撑阻力、突破和跌破关注位。
+- Funding、Open Interest 和全局风险提示。
+- 服务端短缓存、请求合并、超时控制和部分数据降级。
+
+## 运行
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+打开 http://localhost:3000/market-signal 查看实时看板。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 检查
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run lint
+npm run test
+npm run build
+```
 
-## Learn More
+## 数据说明
 
-To learn more about Next.js, take a look at the following resources:
+- 数据源：Binance Spot/Futures Public API。
+- API 路由：`/api/market/snapshot`。
+- 刷新策略：前端 15 秒轮询，服务端 8 秒短缓存。
+- 降级策略：单个币种失败时仍返回可用币种；全部失败且缓存未过期时返回 stale 数据；无可用缓存时返回 503。
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 主要文件
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `src/app/market-signal/page.tsx`：实时看板界面。
+- `src/app/api/market/snapshot/route.ts`：市场快照 API。
+- `src/lib/market/analysis.ts`：指标和信号计算。
+- `src/lib/market/types.ts`：共享类型定义。
+- `tests/market-analysis.test.ts`：核心指标测试。
 
-## Deploy on Vercel
+## 免责声明
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+页面内容仅基于公开行情与深度数据进行量化推断，不构成任何投资建议。请结合自身风险承受能力独立决策。
