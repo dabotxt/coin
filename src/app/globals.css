@@ -1,4 +1,4 @@
-@import "/Users/derrickrose/Desktop/projects/market-signal-dashboard/node_modules/tailwindcss/index.css";
+@import "tailwindcss";
 
 :root {
   --background: #ffffff;
