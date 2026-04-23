@@ -12,12 +12,28 @@ import type {
   SymbolPair,
 } from "@/lib/market/types";
 
-const BINANCE_SPOT_BASE = "https://api.binance.com/api/v3";
-const BINANCE_FUTURES_BASE = "https://fapi.binance.com/fapi/v1";
+const COINBASE_EXCHANGE_BASE = "https://api.exchange.coinbase.com";
 const SYMBOLS: SymbolPair[] = ["BTCUSDT", "ETHUSDT"];
 const CACHE_TTL_MS = 8_000;
 const STALE_TTL_MS = 180_000;
 const FETCH_TIMEOUT_MS = 8_000;
+
+type CoinbaseProduct = "BTC-USD" | "ETH-USD";
+
+type CoinbaseStats = {
+  open: string;
+  high: string;
+  low: string;
+  last: string;
+  volume: string;
+};
+
+type CoinbaseBook = {
+  bids: [string, string, number][];
+  asks: [string, string, number][];
+};
+
+type CoinbaseCandle = [number, number, number, number, number, number];
 
 let cachedSnapshot: SnapshotPayload | null = null;
 let inFlightSnapshot: Promise<SnapshotPayload> | null = null;
@@ -49,6 +65,10 @@ function fallbackPremiumIndex(price: number): BinancePremiumIndex {
   };
 }
 
+function coinbaseProduct(symbol: SymbolPair): CoinbaseProduct {
+  return symbol === "BTCUSDT" ? "BTC-USD" : "ETH-USD";
+}
+
 async function settle<T>(label: string, task: Promise<T>, errors: string[]): Promise<T | null> {
   try {
     return await task;
@@ -78,24 +98,76 @@ async function fetchJson<T>(url: string): Promise<T> {
   }
 }
 
-function fetchTicker(symbol: SymbolPair): Promise<BinanceTicker> {
-  return fetchJson<BinanceTicker>(`${BINANCE_SPOT_BASE}/ticker/24hr?symbol=${symbol}`);
+async function fetchTicker(symbol: SymbolPair): Promise<BinanceTicker> {
+  const product = coinbaseProduct(symbol);
+  const stats = await fetchJson<CoinbaseStats>(`${COINBASE_EXCHANGE_BASE}/products/${product}/stats`);
+  const open = Number(stats.open);
+  const last = Number(stats.last);
+  const priceChangePercent = open > 0 ? ((last - open) / open) * 100 : 0;
+
+  return {
+    symbol,
+    lastPrice: stats.last,
+    priceChangePercent: String(priceChangePercent),
+    highPrice: stats.high,
+    lowPrice: stats.low,
+    volume: stats.volume,
+    quoteVolume: "0",
+  };
 }
 
-function fetchDepth(symbol: SymbolPair): Promise<BinanceDepth> {
-  return fetchJson<BinanceDepth>(`${BINANCE_SPOT_BASE}/depth?symbol=${symbol}&limit=100`);
+async function fetchDepth(symbol: SymbolPair): Promise<BinanceDepth> {
+  const product = coinbaseProduct(symbol);
+  const book = await fetchJson<CoinbaseBook>(`${COINBASE_EXCHANGE_BASE}/products/${product}/book?level=2`);
+
+  return {
+    bids: book.bids.slice(0, 100).map(([price, size]) => [price, size]),
+    asks: book.asks.slice(0, 100).map(([price, size]) => [price, size]),
+  };
 }
 
-function fetchOpenInterest(symbol: SymbolPair): Promise<BinanceOpenInterest> {
-  return fetchJson<BinanceOpenInterest>(`${BINANCE_FUTURES_BASE}/openInterest?symbol=${symbol}`);
+function fetchOpenInterest(): Promise<BinanceOpenInterest> {
+  return Promise.resolve(fallbackOpenInterest());
 }
 
-function fetchPremiumIndex(symbol: SymbolPair): Promise<BinancePremiumIndex> {
-  return fetchJson<BinancePremiumIndex>(`${BINANCE_FUTURES_BASE}/premiumIndex?symbol=${symbol}`);
+function fetchPremiumIndex(price: number): Promise<BinancePremiumIndex> {
+  return Promise.resolve(fallbackPremiumIndex(price));
 }
 
-function fetchKlines(symbol: SymbolPair, interval: "1m" | "5m" | "15m" | "1h", limit: number): Promise<KlineTuple[]> {
-  return fetchJson<KlineTuple[]>(`${BINANCE_SPOT_BASE}/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
+async function fetchKlines(
+  symbol: SymbolPair,
+  interval: "1m" | "5m" | "15m" | "1h",
+  limit: number,
+): Promise<KlineTuple[]> {
+  const product = coinbaseProduct(symbol);
+  const granularityByInterval = {
+    "1m": 60,
+    "5m": 300,
+    "15m": 900,
+    "1h": 3_600,
+  } satisfies Record<typeof interval, number>;
+  const granularity = granularityByInterval[interval];
+  const candles = await fetchJson<CoinbaseCandle[]>(
+    `${COINBASE_EXCHANGE_BASE}/products/${product}/candles?granularity=${granularity}`,
+  );
+
+  return candles
+    .slice(0, limit)
+    .reverse()
+    .map(([time, low, high, open, close, volume]) => [
+      time * 1000,
+      String(open),
+      String(high),
+      String(low),
+      String(close),
+      String(volume),
+      time * 1000 + granularity * 1000 - 1,
+      "0",
+      0,
+      "0",
+      "0",
+      "0",
+    ]);
 }
 
 async function fetchSymbolData(symbol: SymbolPair, errors: string[]): Promise<SymbolMarketData | null> {
@@ -114,8 +186,8 @@ async function fetchSymbolData(symbol: SymbolPair, errors: string[]): Promise<Sy
   const price = Number(ticker.lastPrice);
   const [depth, openInterest, premiumIndex] = await Promise.all([
     settle(`${symbol} depth`, fetchDepth(symbol), errors),
-    settle(`${symbol} open interest`, fetchOpenInterest(symbol), errors),
-    settle(`${symbol} premium index`, fetchPremiumIndex(symbol), errors),
+    settle(`${symbol} open interest`, fetchOpenInterest(), errors),
+    settle(`${symbol} premium index`, fetchPremiumIndex(price), errors),
   ]);
 
   return {
@@ -179,7 +251,7 @@ async function buildLiveSnapshot(): Promise<SnapshotPayload> {
   const payload: SnapshotPayload = {
     updatedAt: now,
     generatedAt: now,
-    source: "Binance Spot/Futures Public API",
+    source: "Coinbase Exchange Public API",
     market,
     globalRiskHint: buildGlobalRiskHint(market, errors.length > 0),
     quality,
